@@ -1,252 +1,212 @@
-# 📊 Bank Loan Data Analysis – SQL KPI Project
+# Bank Loan Data Analysis — SQL KPI Project
 
-## 📌 Project Overview
-
-This project demonstrates advanced SQL analysis on a **Bank Loan dataset** to calculate KPIs, risk metrics, and time-based performance indicators such as:
-
-* Total KPIs
-* Good vs Bad Loan analysis
-* Loan Status distribution
-* Monthly risk trend
-* MTD / PMTD / YTD calculations
-* MoM growth analysis
-
-The goal of this project is to simulate **real-world banking analytics dashboard queries** used in finance and lending companies.
+> End-to-end SQL analytics project simulating a real-world banking dashboard with KPIs, risk metrics, and time-based performance calculations.
 
 ---
 
-## 🛠 Tools & Technologies
+## Overview
 
-* PostgreSQL
-* SQL
-* Data Analysis
-* Aggregations
-* Window Functions
-* CTE (Common Table Expressions)
-* Date Functions
+This project performs structured analysis on a bank loan dataset using PostgreSQL. It covers the full analytics lifecycle — from raw data modelling to KPI reporting — and mirrors the kind of work done by data analysts at banks, fintech companies, and lending platforms.
 
----
-
-## 📂 Dataset Description
-
-The dataset contains loan level information including:
-
-| Column           | Description                        |
-| ---------------- | ---------------------------------- |
-| id               | Loan ID                            |
-| address_state    | State of borrower                  |
-| application_type | Individual / Joint                 |
-| emp_length       | Employment length                  |
-| emp_title        | Job title                          |
-| grade            | Loan grade                         |
-| home_ownership   | Home ownership                     |
-| issue_date       | Loan issue date                    |
-| loan_status      | Current / Fully Paid / Charged Off |
-| annual_income    | Borrower income                    |
-| dti              | Debt to income ratio               |
-| int_rate         | Interest rate                      |
-| loan_amount      | Loan funded                        |
-| total_payment    | Amount received                    |
-| purpose          | Loan purpose                       |
+**What this project answers:**
+- How many loans are good vs bad, and what's the risk exposure?
+- How is the portfolio performing this month vs last month?
+- What does the monthly charged-off trend look like?
+- Are high-DTI borrowers more likely to default?
 
 ---
 
-## 🧱 Table Creation
+## Tech Stack
 
-```sql
-CREATE TABLE loan_data (...)
-```
-
-The table is created using appropriate data types for financial analysis.
+| Tool | Usage |
+|---|---|
+| PostgreSQL | Primary database and query engine |
+| SQL | All analysis, KPIs, and aggregations |
+| CTEs | Multi-step calculations and MoM comparisons |
+| Window Functions | Percentage distributions across loan statuses |
+| Date Functions | MTD, PMTD, YTD, and monthly trend slicing |
 
 ---
 
-## 📊 KPI Calculations
+## Dataset
 
-### Total Applications
+Loan-level data with 15+ fields per record:
 
-```sql
-SELECT COUNT(id)
-FROM loan_data;
-```
+| Column | Type | Description |
+|---|---|---|
+| `id` | BIGINT | Unique loan identifier |
+| `address_state` | VARCHAR | Borrower's state |
+| `application_type` | VARCHAR | Individual or Joint |
+| `emp_length` | VARCHAR | Employment tenure |
+| `emp_title` | VARCHAR | Job title |
+| `grade` / `sub_grade` | VARCHAR | Loan risk grade |
+| `home_ownership` | VARCHAR | Rent / Own / Mortgage |
+| `issue_date` | DATE | Loan origination date |
+| `loan_status` | VARCHAR | Current / Fully Paid / Charged Off |
+| `annual_income` | NUMERIC | Borrower's annual income |
+| `dti` | NUMERIC | Debt-to-income ratio |
+| `int_rate` | NUMERIC | Interest rate |
+| `loan_amount` | NUMERIC | Funded loan amount |
+| `total_payment` | NUMERIC | Amount received from borrower |
+| `purpose` | VARCHAR | Reason for the loan |
 
-### Total Funded Amount
+---
 
-```sql
-SELECT SUM(loan_amount)
-FROM loan_data;
-```
+## KPI Modules
 
-### Total Amount Received
+### 1. Total Portfolio KPIs
 
-```sql
-SELECT SUM(total_payment)
-FROM loan_data;
-```
-
-### Average Interest Rate
-
-```sql
-SELECT AVG(int_rate)
-FROM loan_data;
-```
-
-### Average DTI
+Core metrics for the entire loan book:
 
 ```sql
-SELECT AVG(dti)
-FROM loan_data;
+SELECT COUNT(id)          AS total_applications  FROM loan_data;
+SELECT SUM(loan_amount)   AS total_funded         FROM loan_data;
+SELECT SUM(total_payment) AS total_received       FROM loan_data;
+SELECT ROUND(AVG(int_rate) * 100, 2) AS avg_interest_rate FROM loan_data;
+SELECT ROUND(AVG(dti) * 100, 2)      AS avg_dti            FROM loan_data;
 ```
 
 ---
 
-## ✅ Good vs Bad Loan Analysis
+### 2. Good Loan vs Bad Loan
 
-Loans are classified as:
+Loans are classified based on repayment status:
 
-* Good Loan → Fully Paid, Current
-* Bad Loan → Charged Off
+| Classification | Statuses |
+|---|---|
+| Good Loan | `Fully Paid`, `Current` |
+| Bad Loan | `Charged Off` |
 
 ```sql
-CASE
-WHEN loan_status IN ('Fully Paid','Current')
-THEN 'good_loan'
-ELSE 'bad_loan'
-END
+SELECT
+    CASE
+        WHEN loan_status IN ('Fully Paid', 'Current') THEN 'good_loan'
+        ELSE 'bad_loan'
+    END AS loan_type,
+    COUNT(*)           AS total_count,
+    SUM(loan_amount)   AS funded_amount
+FROM loan_data
+GROUP BY loan_type;
 ```
-
-Used to calculate:
-
-* Loan count
-* Funded amount
-* Risk %
 
 ---
 
-## 📈 Loan Status Percentage
+### 3. Loan Status Distribution
 
-Using CTE + Window Functions
+Uses a CTE + window function to calculate the percentage share of each loan status:
 
 ```sql
-SUM(total) OVER()
+WITH cte AS (
+    SELECT loan_status, COUNT(*) AS total
+    FROM loan_data
+    GROUP BY loan_status
+)
+SELECT
+    loan_status,
+    total,
+    ROUND(total * 100.0 / SUM(total) OVER(), 2) AS pct_share
+FROM cte;
 ```
-
-This calculates percentage contribution of each loan status.
 
 ---
 
-## 📉 Monthly Risk Trend
+### 4. Monthly Risk Trend
 
-Monthly trend using
+Tracks loan health month-over-month — useful for spotting seasonal risk or deteriorating portfolio quality:
 
 ```sql
-DATE_TRUNC('month', issue_date)
+SELECT
+    DATE_TRUNC('month', issue_date)::date AS month,
+    COUNT(*)                                                    AS total_loans,
+    COUNT(*) FILTER (WHERE loan_status = 'Charged Off')         AS charged_off,
+    COUNT(*) FILTER (WHERE loan_status = 'Current')             AS current_loans,
+    COUNT(*) FILTER (WHERE loan_status = 'Fully Paid')          AS fully_paid,
+    ROUND(AVG(dti) * 100, 2)                                    AS avg_dti,
+    ROUND(AVG(int_rate) * 100, 2)                               AS avg_rate
+FROM loan_data
+GROUP BY 1
+ORDER BY 1;
 ```
-
-Metrics:
-
-* Total loans
-* Charged off loans
-* Current loans
-* Fully paid loans
-* Avg DTI
-* Avg Interest rate
-
-Used in dashboards.
 
 ---
 
-## 📅 MTD (Month-To-Date) Calculations
+### 5. Time-Period KPIs
 
+#### MTD — Month-to-Date
 ```sql
 WHERE issue_date >= DATE_TRUNC('month', CURRENT_DATE)
 ```
 
-Used for:
-
-* MTD applications
-* MTD funded
-* MTD received
-* MTD avg rate
-* MTD avg DTI
-
----
-
-## 📅 PMTD (Previous Month-To-Date)
-
+#### PMTD — Previous Month-to-Date
 ```sql
-CURRENT_DATE - INTERVAL '1 month'
+WHERE issue_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+  AND issue_date <  DATE_TRUNC('month', CURRENT_DATE)
 ```
 
-Used for comparison with current month.
-
----
-
-## 📅 YTD (Year-To-Date)
-
+#### YTD — Year-to-Date
 ```sql
-DATE_TRUNC('year', CURRENT_DATE)
+WHERE issue_date >= DATE_TRUNC('year', CURRENT_DATE)
 ```
 
-Used for yearly KPI tracking.
-
 ---
 
-## 📊 MoM (Month-over-Month Growth)
+### 6. MoM Growth (Month-over-Month)
 
-Using CTE:
+Compares current month funded amount against the previous month:
 
 ```sql
-WITH mtd AS (...)
-pmtd AS (...)
+WITH mtd AS (
+    SELECT SUM(loan_amount) AS amount FROM loan_data
+    WHERE issue_date >= DATE_TRUNC('month', CURRENT_DATE)
+),
+pmtd AS (
+    SELECT SUM(loan_amount) AS amount FROM loan_data
+    WHERE issue_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+      AND issue_date <  DATE_TRUNC('month', CURRENT_DATE)
+)
+SELECT
+    mtd.amount  AS mtd_funded,
+    pmtd.amount AS pmtd_funded,
+    ROUND((mtd.amount - pmtd.amount) * 100.0 / pmtd.amount, 2) AS mom_growth_pct
+FROM mtd, pmtd;
 ```
 
-Used to calculate:
+---
 
-* Growth %
-* Performance change
-* Funding trend
+## Key SQL Concepts
+
+- **CTEs** — Multi-step metric pipelines and MoM comparisons
+- **Window Functions** — `SUM() OVER()` for percentage distributions
+- **FILTER clause** — Conditional aggregation without nested subqueries
+- **DATE_TRUNC + INTERVAL** — Clean period slicing for MTD / PMTD / YTD
+- **CASE expressions** — Loan classification logic
+- **Aggregations** — COUNT, SUM, AVG across grouped dimensions
 
 ---
 
-## 📌 Key SQL Concepts Used
-
-* CTE
-* Window Functions
-* CASE
-* FILTER
-* DATE_TRUNC
-* INTERVAL
-* Aggregations
-* KPI calculations
-
----
-
-## 📊 Use Case
-
-This project simulates SQL work done in:
-
-* Banks
-* Fintech companies
-* Lending platforms
-* Risk analytics teams
-* Data analyst dashboards
-
----
-
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 bank-loan-analysis/
-│
-├── bank_loan_kpi_analysis.sql
-├── dataset.csv
+├── bank_loan_kpi_analysis.sql   ← All queries (KPIs, risk, trends, time-based)
+├── dataset.csv                  ← Raw loan-level data
 └── README.md
 ```
 
 ---
 
-## ⭐ Author
+## Use Cases
 
-Santhosh Kumar
-SQL | Data Analytics | PostgreSQL | Data Warehouse Projects
+This project simulates analytics work done in:
+
+- Retail and commercial banking
+- Fintech and lending platforms
+- Risk and credit analytics teams
+- Financial data analyst dashboards
+
+---
+
+## Author
+
+**Santhosh Kumar**  
+SQL · Data Analytics · PostgreSQL · Data Warehouse Projects
